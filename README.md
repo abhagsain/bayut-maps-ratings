@@ -83,4 +83,11 @@ All extension logs are prefixed with `[BayutRatings]`.
 
 ## License
 
-[MIT](LICENSE) © Anurag Bhagsain
+[MIT](LICENSE) © Anurag Bhagsain.
+
+I also built :)
+- [SlidesAI - An AI Presentation Maker](https://slidesai.io?ref=bayut-github)
+- [AI CLI](https://github.com/abhagsain/ai-cli)
+- [Read Changelogs](https://github.com/abhagsain/read-changelogs)
+
+And more on my [Github](https://github.com/abhagsain) 
