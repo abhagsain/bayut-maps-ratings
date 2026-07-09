@@ -4,6 +4,8 @@ Personal-use Manifest V3 Chrome extension that adds cached Google Maps ratings a
 
 It reads each listing's building and coordinates from Bayut's own search data, resolves the Google Maps place, and scrapes the rating, the rating distribution, and the newest reviews (no Google Places API — it isn't rate-limited to 5 reviews and can be sorted by newest). Everything is cached locally so buildings are only scraped once.
 
+![Bayut listings with Google Maps rating badges and an open review popover](docs/images/screenshot-map-view.png)
+
 > **Note:** This is a personal-use tool that scrapes Google Maps by driving hidden background tabs. It is not affiliated with Bayut or Google, and is meant for local unpacked use only — not Chrome Web Store distribution.
 
 ## Install it yourself
