@@ -1,0 +1,173 @@
+:root {
+  color-scheme: light;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, Helvetica, sans-serif;
+}
+
+body {
+  width: 320px;
+  margin: 0;
+  background: #f8f9fa;
+  color: #202124;
+}
+
+.popup {
+  padding: 14px;
+}
+
+.header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+h1 {
+  margin: 0;
+  font-size: 16px;
+  letter-spacing: 0;
+}
+
+p {
+  margin: 0;
+}
+
+#stateLabel {
+  margin-top: 3px;
+  color: #5f6368;
+  font-size: 13px;
+}
+
+.state-dot {
+  width: 10px;
+  height: 10px;
+  margin-top: 5px;
+  border-radius: 50%;
+  background: #9aa0a6;
+}
+
+.state-dot.busy {
+  background: #1a73e8;
+  box-shadow: 0 0 0 4px rgba(26, 115, 232, 0.12);
+}
+
+.state-dot.paused {
+  background: #d93025;
+  box-shadow: 0 0 0 4px rgba(217, 48, 37, 0.12);
+}
+
+.counts {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 7px;
+  margin-top: 14px;
+}
+
+.counts span {
+  min-width: 0;
+  padding: 8px;
+  border: 1px solid #e1e5ea;
+  border-radius: 8px;
+  background: #fff;
+  color: #5f6368;
+  font-size: 12px;
+}
+
+.counts strong {
+  display: block;
+  color: #202124;
+  font-size: 15px;
+}
+
+.reviews {
+  margin-top: 8px;
+  color: #5f6368;
+  font-size: 12px;
+}
+
+.resume {
+  width: 100%;
+  margin-top: 10px;
+  border-color: #d93025;
+  color: #b3261e;
+  font-weight: 700;
+}
+
+.progress {
+  margin-top: 14px;
+}
+
+.section-title {
+  color: #5f6368;
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.progress-list {
+  max-height: 150px;
+  margin-top: 7px;
+  overflow-y: auto;
+  border: 1px solid #e1e5ea;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.row {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 9px;
+  border-bottom: 1px solid #edf0f2;
+  font-size: 13px;
+}
+
+.row:last-child {
+  border-bottom: 0;
+}
+
+.building {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.status {
+  flex: 0 0 auto;
+  color: #5f6368;
+  font-size: 12px;
+}
+
+.empty {
+  padding: 14px 9px;
+  color: #5f6368;
+  font-size: 13px;
+}
+
+.actions {
+  display: flex;
+  gap: 7px;
+  margin-top: 14px;
+}
+
+button {
+  min-width: 0;
+  flex: 1;
+  padding: 7px 8px;
+  border: 1px solid #dadce0;
+  border-radius: 8px;
+  background: #fff;
+  color: #202124;
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+}
+
+button:hover {
+  border-color: #bdc1c6;
+  background: #f1f3f4;
+}
+
+button.danger {
+  color: #b3261e;
+}

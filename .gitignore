@@ -1,0 +1,12 @@
+# Local debug artifacts (contain live session secrets — never commit)
+state.json
+request.sh
+
+# Dev/orchestration scratch
+agents.log
+output.html
+*.log
+
+# OS / tooling
+.DS_Store
+node_modules/

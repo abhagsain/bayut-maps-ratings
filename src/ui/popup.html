@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Bayut Ratings</title>
+    <link rel="stylesheet" href="popup.css">
+  </head>
+  <body>
+    <main class="popup">
+      <header class="header">
+        <div>
+          <h1>Bayut Ratings</h1>
+          <p id="stateLabel">Loading...</p>
+        </div>
+        <span id="stateDot" class="state-dot idle" aria-hidden="true"></span>
+      </header>
+
+      <section class="counts" aria-label="Scraping counts">
+        <span><strong id="queuedCount">0</strong> queued</span>
+        <span><strong id="scrapingCount">0</strong> scraping</span>
+        <span><strong id="cachedCount">0</strong> cached</span>
+      </section>
+      <p id="reviewCount" class="reviews">0 cached review snippets</p>
+      <button id="resumeButton" type="button" class="resume" hidden>Resume scraping</button>
+
+      <section class="progress" aria-label="Current work">
+        <div class="section-title">In progress</div>
+        <div id="progressList" class="progress-list"></div>
+      </section>
+
+      <footer class="actions">
+        <button id="refreshButton" type="button">Refresh</button>
+        <button id="dashboardButton" type="button">Open dashboard</button>
+        <button id="clearButton" type="button" class="danger">Clear cache</button>
+      </footer>
+    </main>
+    <script src="popup.js"></script>
+  </body>
+</html>

@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Bayut Ratings Dashboard</title>
+    <link rel="stylesheet" href="dashboard.css">
+  </head>
+  <body>
+    <main class="page">
+      <header class="hero">
+        <div>
+          <h1>Bayut Ratings Cache</h1>
+          <p>Cached Google Maps ratings and newest review snippets.</p>
+        </div>
+        <button id="clearButton" type="button" class="danger">Clear cache</button>
+      </header>
+
+      <section id="statusStrip" class="status-strip">Loading scraping status...</section>
+
+      <section class="toolbar">
+        <label>
+          <span>Filter</span>
+          <input id="filterInput" type="search" placeholder="Building name">
+        </label>
+        <button id="refreshButton" type="button">Refresh</button>
+      </section>
+
+      <section class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th data-sort="building" tabindex="0">Building</th>
+              <th data-sort="rating" tabindex="0">Rating</th>
+              <th data-sort="reviewCount" tabindex="0">Reviews</th>
+              <th data-sort="scrapedAt" tabindex="0">Last scraped</th>
+              <th>Maps link</th>
+            </tr>
+          </thead>
+          <tbody id="cacheBody"></tbody>
+        </table>
+      </section>
+    </main>
+    <script src="dashboard.js"></script>
+  </body>
+</html>

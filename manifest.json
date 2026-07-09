@@ -1,0 +1,57 @@
+{
+  "manifest_version": 3,
+  "name": "Bayut Google Maps Ratings",
+  "version": "0.1.0",
+  "description": "Personal-use Bayut listing panels with cached Google Maps ratings and newest review snippets.",
+  "action": {
+    "default_title": "Bayut Google Maps Ratings",
+    "default_popup": "src/ui/popup.html"
+  },
+  "options_page": "src/ui/dashboard.html",
+  "permissions": [
+    "storage",
+    "tabs",
+    "scripting",
+    "webNavigation",
+    "alarms",
+    "unlimitedStorage"
+  ],
+  "host_permissions": [
+    "*://*.bayut.com/*",
+    "*://*.google.com/*"
+  ],
+  "background": {
+    "service_worker": "src/background/worker.js"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "*://*.bayut.com/*"
+      ],
+      "js": [
+        "src/bayut/interceptor.js"
+      ],
+      "run_at": "document_start",
+      "world": "MAIN"
+    },
+    {
+      "matches": [
+        "*://*.bayut.com/*"
+      ],
+      "js": [
+        "src/bayut/content.js"
+      ],
+      "run_at": "document_start"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "src/bayut/panel.css"
+      ],
+      "matches": [
+        "*://*.bayut.com/*"
+      ]
+    }
+  ]
+}
