@@ -10,6 +10,7 @@
   const PENDING_TIMEOUT_MS = 120000;
   const RECHECK_INTERVAL_MS = 10000;
   const MONITOR_INTERVAL_MS = 5000;
+  const VIEWPORT_UPDATE_DEBOUNCE_MS = 250;
   const LOG_PREFIX = "[BayutRatings][content]";
 
   const hitsByExternalId = new Map();
@@ -20,10 +21,13 @@
   const pendingStartedAt = new Map();
   const lastRecheckAt = new Map();
   const noHitLoggedExternalIds = new Set();
+  const visibleExternalIDs = new Set();
   let panelCssPromise = null;
   let mutationTarget = null;
   let popoverPortalPromise = null;
   let activePopover = null;
+  let focusedExternalID = null;
+  let viewportUpdateTimer = 0;
 
   function log(message) {
     console.log(`${LOG_PREFIX} ${message}`);
@@ -297,6 +301,7 @@
     if (!result) return "loading";
     if (result.status === "queued") return "queued";
     if (result.status === "scraping") return "loading";
+    if (result.status === "deferred") return "idle";
     if (result.status === "timeout") return "timeout";
     if (result.captcha) return "captcha";
     if (result.noMatch) return "no-match";
@@ -322,6 +327,7 @@
       result.status === "done" ||
       result.status === "noMatch" ||
       result.status === "timeout" ||
+      result.status === "deferred" ||
       result.captcha ||
       result.noMatch ||
       result.error
@@ -337,6 +343,7 @@
     return [
       result.status || "",
       result.placeId || "",
+      result.placeName || "",
       result.rating == null ? "" : String(result.rating),
       result.reviewCount == null ? "" : String(result.reviewCount),
       Array.isArray(result.reviews) ? String(result.reviews.length) : ""
@@ -354,6 +361,10 @@
     const equivalent = equivalentResult(previous, normalized);
     resultsByExternalId.set(String(externalID), normalized);
     logResult(String(externalID), normalized);
+
+    if (normalized && normalized.status === "deferred") {
+      clearRequestGuards(String(externalID));
+    }
 
     if (isPendingResult(normalized)) {
       if (!pendingStartedAt.has(String(externalID))) {
@@ -388,6 +399,15 @@
     if (result.error) return { ...result, status: "error", retryable: true };
     if (result.rating != null || result.placeId || result.reviews) return { ...result, status: "done" };
     return result;
+  }
+
+  function clearRequestGuards(externalID) {
+    requestedExternalIds.delete(externalID);
+    pendingStartedAt.delete(externalID);
+    lastRecheckAt.delete(externalID);
+    allListingCards().forEach((card) => {
+      if (externalIdFromCard(card) === externalID) requestedCards.delete(card);
+    });
   }
 
   function resetHostPosition(host) {
@@ -450,6 +470,8 @@
     const rating = result && result.rating != null && Number.isFinite(Number(result.rating)) ? Number(result.rating).toFixed(1) : "";
     const reviewCount = result && result.reviewCount != null && Number.isFinite(Number(result.reviewCount)) ? Number(result.reviewCount).toLocaleString() : "";
     const mapsUrl = result && result.mapsUrl ? result.mapsUrl : "";
+    const placeName = result && typeof result.placeName === "string" ? result.placeName.trim() : "";
+    const showPlaceName = placeName && !/^https?:\/\//i.test(placeName);
     const summaryStars = rating ? starRow(Number(rating), `${rating} out of 5 stars`, "br-summary-stars") : "";
     const distribution = distributionHtml(result && result.distribution);
     const reviewsHtml = reviewRowsHtml(reviews, sortMode || "newest");
@@ -461,6 +483,7 @@
           <div class="br-summary-copy">
             ${summaryStars}
             <div class="br-summary-count">${escapeHtml(reviewCount ? `${reviewCount} reviews` : "Google Maps reviews")}</div>
+            ${showPlaceName ? `<div class="br-place-name">${escapeHtml(placeName)}</div>` : ""}
           </div>
           ${mapsIconLink(mapsUrl, "br-popover-link br-maps-icon")}
         </div>
@@ -694,7 +717,7 @@
     if (!externalID || requestedCards.has(card)) return;
 
     const existing = resultsByExternalId.get(externalID);
-    if (existing) {
+    if (existing && existing.status !== "deferred") {
       requestedCards.add(card);
       renderPanel(card, externalID, existing);
       return;
@@ -751,8 +774,50 @@
     resendLookup(externalID);
   }
 
+  function sendViewportUpdateNow() {
+    sendMessage({
+      type: "VIEWPORT_UPDATE",
+      visibleExternalIDs: Array.from(visibleExternalIDs),
+      focusedExternalID
+    });
+  }
+
+  function scheduleViewportUpdate() {
+    clearTimeout(viewportUpdateTimer);
+    viewportUpdateTimer = setTimeout(sendViewportUpdateNow, VIEWPORT_UPDATE_DEBOUNCE_MS);
+  }
+
+  function setFocusedExternalID(externalID) {
+    const next = externalID ? String(externalID) : null;
+    if (focusedExternalID === next) return;
+    focusedExternalID = next;
+    scheduleViewportUpdate();
+  }
+
+  function clearFocusedExternalID(externalID) {
+    if (focusedExternalID !== String(externalID || "")) return;
+    focusedExternalID = null;
+    scheduleViewportUpdate();
+  }
+
+  function cardIsVisible(card) {
+    const rect = card.getBoundingClientRect();
+    return rect.bottom > 0 && rect.top < window.innerHeight && rect.right > 0 && rect.left < window.innerWidth;
+  }
+
   const observer = new IntersectionObserver((entries) => {
     entries.forEach((entry) => {
+      const externalID = externalIdFromCard(entry.target);
+      if (externalID) {
+        const wasVisible = visibleExternalIDs.has(externalID);
+        if (entry.isIntersecting) {
+          visibleExternalIDs.add(externalID);
+        } else {
+          visibleExternalIDs.delete(externalID);
+        }
+        if (wasVisible !== visibleExternalIDs.has(externalID)) scheduleViewportUpdate();
+      }
+
       if (entry.isIntersecting) {
         requestLookup(entry.target);
       }
@@ -768,17 +833,38 @@
     return rect.bottom >= -margin && rect.top <= window.innerHeight + margin;
   }
 
+  function isExternalIDVisibleOrNearViewport(externalID) {
+    if (visibleExternalIDs.has(externalID)) return true;
+    return allListingCards().some((card) => externalIdFromCard(card) === externalID && isNearViewport(card));
+  }
+
   function scanListings() {
     const cards = allListingCards();
     observeResultsContainer(cards);
+    let visibleChanged = false;
 
     cards.forEach((card) => {
+      const externalID = externalIdFromCard(card);
       if (!observedCards.has(card)) {
         observedCards.add(card);
         observer.observe(card);
+        card.addEventListener("mouseenter", () => setFocusedExternalID(externalIdFromCard(card)));
+        card.addEventListener("mouseleave", () => clearFocusedExternalID(externalIdFromCard(card)));
+        card.addEventListener("focusin", () => setFocusedExternalID(externalIdFromCard(card)));
+        card.addEventListener("focusout", () => clearFocusedExternalID(externalIdFromCard(card)));
       }
 
-      const externalID = externalIdFromCard(card);
+      if (externalID) {
+        const isVisible = cardIsVisible(card);
+        const wasVisible = visibleExternalIDs.has(externalID);
+        if (isVisible) {
+          visibleExternalIDs.add(externalID);
+        } else if (!isNearViewport(card)) {
+          visibleExternalIDs.delete(externalID);
+        }
+        if (wasVisible !== visibleExternalIDs.has(externalID)) visibleChanged = true;
+      }
+
       const result = externalID ? resultsByExternalId.get(externalID) : null;
       if (externalID && result && !panelHostForCard(card, externalID).host) {
         renderPanel(card, externalID, result);
@@ -787,6 +873,8 @@
         requestLookup(card);
       }
     });
+
+    if (visibleChanged) scheduleViewportUpdate();
   }
 
   function storeHits(hits) {
@@ -833,12 +921,14 @@
 
   function start() {
     scanListings();
+    scheduleViewportUpdate();
   }
 
   setInterval(() => {
     const now = Date.now();
     resultsByExternalId.forEach((result, externalID) => {
       if (!isPendingResult(result)) return;
+      if (!isExternalIDVisibleOrNearViewport(externalID)) return;
 
       const startedAt = pendingStartedAt.get(externalID) || now;
       pendingStartedAt.set(externalID, startedAt);

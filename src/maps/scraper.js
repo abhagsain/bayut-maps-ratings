@@ -184,9 +184,21 @@
     return match ? Number(match[1].replace(/,/g, "")) : null;
   }
 
+  function placeNameFromUrl(href) {
+    const match = String(href || location.href).match(/\/maps\/place\/([^/@]+)/);
+    if (!match) return "";
+    try {
+      return decodeURIComponent(match[1].replace(/\+/g, " ")).replace(/\s+/g, " ").trim();
+    } catch (error) {
+      return match[1].replace(/\+/g, " ").replace(/\s+/g, " ").trim();
+    }
+  }
+
   function placeLabel() {
-    const heading = visibleElements("h1, [role='heading']").find((element) => textOf(element).length > 1);
-    return heading ? textOf(heading) : location.href;
+    const heading = visibleElements("h1, [role='heading']")
+      .map((element) => textOf(element))
+      .find((text) => text.length > 1 && !/^results$/i.test(text) && !/^https?:\/\//i.test(text));
+    return heading || placeNameFromUrl(location.href) || location.href;
   }
 
   function hasResultsHeading() {
@@ -497,6 +509,7 @@
   log(`place=${placeLabel()} rating=${rating != null ? rating : ""} reviews=${reviewCount != null ? reviewCount : reviews.length}`);
   const result = {
     placeId: placeId || `url:${location.href}`,
+    placeName: placeLabel(),
     rating,
     reviewCount,
     reviews,

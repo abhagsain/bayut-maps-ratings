@@ -4,7 +4,8 @@ const JITTER_MAX_MS = 1500;
 const TAB_LOAD_TIMEOUT_MS = 25000;
 const KEEPALIVE_INTERVAL_MS = 20000;
 const CAPTCHA_RECHECK_INTERVAL_MS = 15000;
-const MAX_CONCURRENCY = 3;
+const MAX_CONCURRENCY = 4;
+const MAX_QUEUE = 200;
 const RESULTS_LIST_ACCEPT_M = 600;
 const FINAL_PLACE_ACCEPT_M = 700;
 const PENDING_QUEUE_KEY = "queue:pending";
@@ -17,6 +18,7 @@ const queuedByBuilding = new Map();
 const queue = [];
 const activeEntries = new Set();
 const poolTabs = [];
+const visibleExternalIDs = new Set();
 
 let dispatching = false;
 let keepaliveTimer = null;
@@ -25,6 +27,7 @@ let captchaTabId = null;
 let captchaWatchTimer = null;
 let captchaWatchRunning = false;
 let sessionDoneCount = 0;
+let focusedExternalID = null;
 
 function log(message) {
   console.log(`${LOG_PREFIX} ${message}`);
@@ -94,6 +97,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
+  if (message.type === "VIEWPORT_UPDATE") {
+    updateViewportState(message);
+    sendResponse({ ok: true });
+    return false;
+  }
+
   if (message.type === "LOOKUP_LISTING") {
     lookupListing(message, sender.tab && sender.tab.id)
       .then((result) => sendResponse({ ok: true, result }))
@@ -120,6 +129,7 @@ chrome.tabs.onRemoved.addListener((tabId) => {
   if (poolTab) {
     poolTab.closed = true;
     poolTab.busy = false;
+    trackScraperTabs().catch(() => {});
   }
 });
 
@@ -129,6 +139,16 @@ if (chrome.alarms && chrome.alarms.onAlarm) {
       restorePendingQueue().catch(() => {});
     }
   });
+}
+
+function updateViewportState(message) {
+  visibleExternalIDs.clear();
+  (Array.isArray(message.visibleExternalIDs) ? message.visibleExternalIDs : []).forEach((externalID) => {
+    if (externalID) visibleExternalIDs.add(String(externalID));
+  });
+  focusedExternalID = message.focusedExternalID ? String(message.focusedExternalID) : null;
+  notifyQueuedPositions();
+  dispatchQueue().catch(() => {});
 }
 
 const initPromise = initializeWorker();
@@ -272,7 +292,7 @@ async function getStatusSnapshot() {
         building: hitLabel(entry.hit),
         status: "scraping"
       })),
-      ...queue.map((entry) => ({
+      ...queueOrder().map((entry) => ({
         building: hitLabel(entry.hit),
         status: "queued"
       }))
@@ -320,6 +340,7 @@ async function getCacheList() {
         rating: placeEntry && placeEntry.rating != null ? placeEntry.rating : null,
         reviewCount: placeEntry && placeEntry.reviewCount != null ? placeEntry.reviewCount : null,
         distribution: placeEntry && placeEntry.distribution ? placeEntry.distribution : null,
+        placeName: placeEntry && placeEntry.placeName ? placeEntry.placeName : "",
         placeId,
         mapsUrl: placeEntry && placeEntry.mapsUrl ? placeEntry.mapsUrl : buildingEntry && buildingEntry.mapsUrl ? buildingEntry.mapsUrl : "",
         scrapedAt: placeEntry && placeEntry.scrapedAt ? placeEntry.scrapedAt : buildingEntry.scrapedAt || buildingEntry.updatedAt || null,
@@ -417,15 +438,22 @@ function enqueueLookup(request) {
     buildingKey: request.buildingKey,
     hit: request.hit,
     requests: [],
-    started: false
+    started: false,
+    enqueuedAt: Date.now()
   };
 
   addRequestToEntry(entry, request);
 
   queuedByBuilding.set(request.buildingKey, entry);
   queue.push(entry);
+  const evictedEntries = evictOverflowQueue();
   startKeepaliveIfNeeded();
   persistPendingQueue().catch(() => {});
+  if (evictedEntries.includes(entry)) {
+    const result = { status: "deferred" };
+    log(`lookup id=${request.externalID} -> cacheHit=false / deferred`);
+    return result;
+  }
   const result = {
     status: "queued",
     position: positionForEntry(entry)
@@ -443,9 +471,53 @@ function addRequestToEntry(entry, request) {
   });
 }
 
-function positionForEntry(entry) {
+function requestExternalIDs(entry) {
+  return uniqueRequests(entry).map((request) => String(request.externalID || "")).filter(Boolean);
+}
+
+function entryPriority(entry) {
+  const externalIDs = requestExternalIDs(entry);
+  if (focusedExternalID && externalIDs.some((externalID) => externalID === focusedExternalID)) return 2;
+  if (externalIDs.some((externalID) => visibleExternalIDs.has(externalID))) return 1;
+  return 0;
+}
+
+function queueOrder() {
+  return queue.slice().sort((a, b) => {
+    const priorityDiff = entryPriority(b) - entryPriority(a);
+    if (priorityDiff) return priorityDiff;
+    return Number(a.enqueuedAt || 0) - Number(b.enqueuedAt || 0);
+  });
+}
+
+function selectNextEntry() {
+  const [entry] = queueOrder();
+  if (!entry) return null;
   const index = queue.indexOf(entry);
+  if (index >= 0) queue.splice(index, 1);
+  return entry;
+}
+
+function positionForEntry(entry) {
+  const index = queueOrder().indexOf(entry);
   return index >= 0 ? index + 1 : 0;
+}
+
+function evictOverflowQueue() {
+  const evicted = [];
+  while (queue.length > MAX_QUEUE) {
+    const candidates = queue
+      .filter((entry) => entryPriority(entry) === 0)
+      .sort((a, b) => Number(a.enqueuedAt || 0) - Number(b.enqueuedAt || 0));
+    const entry = candidates[0];
+    if (!entry) break;
+    const index = queue.indexOf(entry);
+    if (index >= 0) queue.splice(index, 1);
+    queuedByBuilding.delete(entry.buildingKey);
+    evicted.push(entry);
+    notifyEntry(entry, { status: "deferred" });
+  }
+  return evicted;
 }
 
 async function dispatchQueue() {
@@ -454,7 +526,8 @@ async function dispatchQueue() {
 
   try {
     while (!queuePaused && queue.length && activeEntries.size < MAX_CONCURRENCY) {
-      const entry = queue.shift();
+      const entry = selectNextEntry();
+      if (!entry) break;
       entry.started = true;
       activeEntries.add(entry);
       startKeepaliveIfNeeded();
@@ -517,7 +590,7 @@ function uniqueRequests(entry) {
 }
 
 function notifyQueuedPositions() {
-  queue.forEach((entry, index) => {
+  queueOrder().forEach((entry, index) => {
     notifyEntry(entry, {
       status: "queued",
       position: index + 1
@@ -781,6 +854,7 @@ async function scrapeEntry(entry) {
     const placeEntry = {
       status: "done",
       placeId: cleanResult.placeId,
+      placeName: cleanResult.placeName || "",
       building: hitLabel(entry.hit),
       neighbourhood: entry.hit.neighbourhood || "",
       title: entry.hit.title || "",
@@ -889,6 +963,7 @@ function persistableEntry(entry) {
     buildingKey: entry.buildingKey,
     hit: entry.hit,
     started: Boolean(entry.started),
+    enqueuedAt: Number(entry.enqueuedAt || Date.now()),
     requests: uniqueRequests(entry).map((request) => ({
       externalID: request.externalID,
       tabId: request.tabId
@@ -921,7 +996,8 @@ async function restorePendingQueue() {
       buildingKey: storedEntry.buildingKey,
       hit,
       requests: [],
-      started: false
+      started: false,
+      enqueuedAt: Number(storedEntry.enqueuedAt || Date.now())
     };
     (Array.isArray(storedEntry.requests) ? storedEntry.requests : []).forEach((request) => {
       addRequestToEntry(entry, {
@@ -934,6 +1010,7 @@ async function restorePendingQueue() {
       queue.push(entry);
     }
   });
+  evictOverflowQueue();
 
   if (queue.length) {
     startKeepaliveIfNeeded();
@@ -950,11 +1027,22 @@ async function trackScraperTabs() {
 async function cleanupOrphanScraperTabs() {
   const stored = (await storageGet(SCRAPER_TABS_KEY))[SCRAPER_TABS_KEY];
   const ids = Array.isArray(stored) ? stored : [];
-  const currentIds = new Set(poolTabs.filter((tab) => !tab.closed).map((tab) => tab.id));
-  await Promise.all(ids
-    .filter((tabId) => !currentIds.has(tabId))
-    .map((tabId) => chrome.tabs.remove(tabId).catch(() => {})));
-  await storageSet({ [SCRAPER_TABS_KEY]: [] });
+  for (const tabId of ids) {
+    if (poolTabs.some((tab) => tab.id === tabId && !tab.closed)) continue;
+    const tab = await chrome.tabs.get(tabId).catch(() => null);
+    if (tab) poolTabs.push({ id: tabId, busy: false, closed: false });
+  }
+
+  const openTabs = poolTabs.filter((tab) => !tab.closed);
+  const extras = openTabs.slice(MAX_CONCURRENCY);
+  if (extras.length) {
+    await Promise.all(extras.map((tab) => chrome.tabs.remove(tab.id).catch(() => {})));
+    extras.forEach((tab) => {
+      tab.closed = true;
+      tab.busy = false;
+    });
+  }
+  await trackScraperTabs().catch(() => {});
 }
 
 function startKeepaliveIfNeeded() {
