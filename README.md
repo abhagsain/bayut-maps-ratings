@@ -1,8 +1,12 @@
 # Bayut Google Maps Ratings Extension
 
-Personal-use Manifest V3 Chrome extension that adds cached Google Maps ratings and newest review snippets directly onto [Bayut](https://www.bayut.com) listing cards — in both the regular list view and the map/commute view — so you don't have to keep switching to Google Maps while apartment hunting.
+See a building's **Google Maps rating and latest reviews right on its [Bayut](https://www.bayut.com) listing** — so you can skip badly-rated buildings without looking each one up on Google Maps.
 
-It reads each listing's building and coordinates from Bayut's own search data, resolves the Google Maps place, and scrapes the rating, the rating distribution, and the newest reviews (no Google Places API — it isn't rate-limited to 5 reviews and can be sorted by newest). Everything is cached locally so buildings are only scraped once.
+When you're flat-hunting on Bayut, a listing can look great while the building itself has broken lifts, poor maintenance, or noisy neighbours — the kind of thing you'd only find out from its Google Maps reviews. Normally you'd copy each building's name into Google Maps, read the reviews, and go back… for every single listing. It's slow and easy to miss a red flag.
+
+This free browser add-on does that step for you automatically. Every listing gets a small ⭐ rating badge, and hovering it shows the star breakdown and the newest reviews. It remembers what it has already checked, so it's instant the next time you see the same building. It works on both the normal list view and the map view, there's no sign-up, and nothing you do leaves your own browser.
+
+> I built this for my own apartment search in Dubai because I got tired of checking every building's reviews by hand.
 
 ![Bayut listings with Google Maps rating badges and an open review popover](docs/images/screenshot-map-view.png)
 
@@ -10,7 +14,7 @@ It reads each listing's building and coordinates from Bayut's own search data, r
 
 ## Install it yourself
 
-**Requirements:** Google Chrome (or any Chromium browser that supports MV3 unpacked extensions), signed into a Google account in the same profile.
+**You'll need:** Google Chrome (or another Chrome-based browser like Edge or Brave), and to be signed in to your Google account in that browser.
 
 1. Get the code — either clone it:
    ```bash
@@ -21,7 +25,7 @@ It reads each listing's building and coordinates from Bayut's own search data, r
 3. Toggle **Developer mode** on (top-right).
 4. Click **Load unpacked** and select the project folder (the one containing `manifest.json`).
 5. Open the puzzle-piece extensions menu and **pin** *Bayut Google Maps Ratings* so the progress popup is one click away.
-6. Browse a Bayut rental/sale search page. Ratings appear on each card as they resolve; the first time a building is seen it scrapes Google Maps (a few seconds), after which it's instant from cache.
+6. Browse a Bayut rental/sale search page. Ratings appear on each listing as they load; the first time it sees a building it looks it up on Google Maps (a few seconds), and after that it's instant.
 
 There is no build step and no dependencies — it's plain JavaScript loaded straight from the folder.
 
@@ -33,7 +37,13 @@ There is no build step and no dependencies — it's plain JavaScript loaded stra
 - **Popover:** hover the badge for the rating distribution, per-review stars, and newest review snippets, with **Newest / Highest / Lowest** sorting.
 - **Progress:** click the pinned icon for live scraping status and cache size; open the dashboard for the full cached-building table.
 
+---
+
+*Everything below is for developers — if you just want to use the extension, you're all set above.*
+
 ## How it works
+
+It's a plain-JavaScript Manifest V3 Chrome extension (no build step, no dependencies). It reads each listing's building and coordinates from Bayut's own search data, resolves the Google Maps place, and scrapes the rating, rating distribution, and newest reviews — deliberately without the Google Places API, which caps reviews at 5 and can't sort by newest. Results are cached locally so each building is only scraped once.
 
 - `src/bayut/interceptor.js` runs in Bayut's MAIN world at `document_start`, reads the initial server-rendered `window.state.algolia.content` hits, and intercepts the page's later Algolia `fetch` and XHR responses.
 - `src/bayut/content.js` runs in the isolated extension world, records Bayut listing hits, observes visible listing cards, and injects an idempotent shadow-DOM rating badge plus hover popover.
