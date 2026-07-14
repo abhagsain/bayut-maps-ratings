@@ -18,6 +18,30 @@
 
       <section id="statusStrip" class="status-strip">Loading scraping status...</section>
 
+      <section class="hidden-section" aria-labelledby="hiddenBuildingsTitle">
+        <div class="section-heading">
+          <div>
+            <h2 id="hiddenBuildingsTitle">Hidden buildings</h2>
+            <p>Buildings whose Bayut listing cards are hidden.</p>
+          </div>
+          <button id="unhideAllButton" type="button">Unhide all</button>
+        </div>
+        <div class="hidden-table-wrap">
+          <table class="hidden-table">
+            <thead>
+              <tr>
+                <th>Building</th>
+                <th>Neighbourhood</th>
+                <th>Rating</th>
+                <th>Hidden</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+            <tbody id="hiddenBuildingsBody"></tbody>
+          </table>
+        </div>
+      </section>
+
       <section class="toolbar">
         <label>
           <span>Filter</span>

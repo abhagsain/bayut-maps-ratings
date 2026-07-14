@@ -7,6 +7,8 @@
   const LOCATION_SELECTOR = '[aria-label="Location"]';
   const GALLERY_SELECTOR = '[aria-label="Gallery Container"], [aria-label="Cover Photo"], img[aria-label="Listing photo"]';
   const MAP_ARTICLE_SELECTOR = 'article[aria-label="Listing card"]';
+  const ADVERT_SELECTOR = '[aria-label="Inline CPL Project"]';
+  const HIDDEN_BUILDINGS_KEY = "hidden:buildings";
   const PENDING_TIMEOUT_MS = 120000;
   const RECHECK_INTERVAL_MS = 10000;
   const MONITOR_INTERVAL_MS = 5000;
@@ -22,10 +24,13 @@
   const lastRecheckAt = new Map();
   const noHitLoggedExternalIds = new Set();
   const visibleExternalIDs = new Set();
+  const hiddenBuildings = new Map();
   let panelCssPromise = null;
   let mutationTarget = null;
   let popoverPortalPromise = null;
+  let hiddenManagerPortalPromise = null;
   let activePopover = null;
+  let hiddenManagerOpen = false;
   let focusedExternalID = null;
   let viewportUpdateTimer = 0;
 
@@ -79,6 +84,91 @@
     return popoverPortalPromise;
   }
 
+  async function getHiddenManagerPortal() {
+    if (!hiddenManagerPortalPromise) {
+      hiddenManagerPortalPromise = getPanelCss().then((css) => {
+        let host = document.getElementById("bayut-ratings-hidden-manager");
+        if (!host) {
+          host = document.createElement("div");
+          host.id = "bayut-ratings-hidden-manager";
+          host.style.position = "fixed";
+          host.style.left = "16px";
+          host.style.bottom = "16px";
+          host.style.zIndex = "2147482999";
+          document.body.appendChild(host);
+        }
+
+        const root = host.shadowRoot || host.attachShadow({ mode: "open" });
+        root.innerHTML = `<style>${css}</style><div class="br-hidden-manager"></div>`;
+        return {
+          host,
+          root,
+          manager: root.querySelector(".br-hidden-manager")
+        };
+      });
+    }
+    return hiddenManagerPortalPromise;
+  }
+
+  function hiddenBuildingRowsHtml() {
+    return Array.from(hiddenBuildings.entries())
+      .sort((a, b) => Number(b[1].hiddenAt || 0) - Number(a[1].hiddenAt || 0))
+      .map(([key, entry]) => {
+        const rating = entry.rating != null && Number.isFinite(Number(entry.rating))
+          ? `<span class="br-hidden-rating">${escapeHtml(Number(entry.rating).toFixed(1))}★</span>`
+          : "";
+        return `
+          <div class="br-hidden-row">
+            <div class="br-hidden-copy">
+              <span class="br-hidden-label">${escapeHtml(entry.label || "Hidden building")}</span>
+              ${rating}
+            </div>
+            <button type="button" class="br-hidden-unhide" data-building-key="${escapeHtml(key)}">Unhide</button>
+          </div>
+        `;
+      }).join("");
+  }
+
+  async function renderHiddenManager(cards) {
+    if (!document.body) return;
+    const hiddenCount = (cards || allListingCards())
+      .filter((card) => card.dataset.bayutRatingsHidden === "1")
+      .length;
+    const portal = await getHiddenManagerPortal();
+    portal.host.hidden = hiddenCount === 0;
+    if (hiddenCount === 0) hiddenManagerOpen = false;
+
+    portal.manager.innerHTML = `
+      <button type="button" class="br-hidden-pill" aria-expanded="${hiddenManagerOpen ? "true" : "false"}">
+        <span>🚫 ${hiddenCount} listings hidden</span>
+        <span class="br-hidden-caret" aria-hidden="true">${hiddenManagerOpen ? "▾" : "▴"}</span>
+      </button>
+      <section class="br-hidden-panel" aria-label="Hidden buildings" ${hiddenManagerOpen ? "" : "hidden"}>
+        <div class="br-hidden-panel-head">
+          <strong>Hidden buildings</strong>
+          <button type="button" class="br-hidden-all">Unhide all</button>
+        </div>
+        <div class="br-hidden-list">${hiddenBuildingRowsHtml()}</div>
+      </section>
+    `;
+
+    portal.manager.querySelector(".br-hidden-pill").addEventListener("click", (event) => {
+      event.stopPropagation();
+      hiddenManagerOpen = !hiddenManagerOpen;
+      renderHiddenManager().catch(() => {});
+    });
+    portal.manager.querySelector(".br-hidden-all").addEventListener("click", (event) => {
+      event.stopPropagation();
+      unhideAllBuildings().catch(() => {});
+    });
+    portal.manager.querySelectorAll(".br-hidden-unhide").forEach((button) => {
+      button.addEventListener("click", (event) => {
+        event.stopPropagation();
+        unhideBuilding(button.dataset.buildingKey || "").catch(() => {});
+      });
+    });
+  }
+
   function sendMessage(message) {
     return new Promise((resolve) => {
       chrome.runtime.sendMessage(message, (response) => {
@@ -99,6 +189,72 @@
   function externalIdFromCard(card) {
     const anchor = card && card.querySelector && card.querySelector(LISTING_LINK_SELECTOR);
     return anchor ? externalIdFromHref(anchor.getAttribute("href") || anchor.href) : "";
+  }
+
+  function normalizeText(value) {
+    return String(value || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim().replace(/\s+/g, "-");
+  }
+
+  function buildingKeyFromHit(hit) {
+    if (!hit || !hit.geography || hit.geography.lat == null || hit.geography.lng == null) return "";
+    const name = normalizeText(hit.building || hit.neighbourhood || hit.title || "coordinates");
+    return `${name}:${Number(hit.geography.lat).toFixed(5)}:${Number(hit.geography.lng).toFixed(5)}`;
+  }
+
+  function setHiddenBuildings(value) {
+    hiddenBuildings.clear();
+    if (!value || typeof value !== "object" || Array.isArray(value)) return;
+    Object.entries(value).forEach(([key, entry]) => {
+      if (key && entry && typeof entry === "object") hiddenBuildings.set(key, entry);
+    });
+  }
+
+  async function readHiddenBuildings() {
+    const stored = await chrome.storage.local.get(HIDDEN_BUILDINGS_KEY);
+    const value = stored && stored[HIDDEN_BUILDINGS_KEY];
+    return value && typeof value === "object" && !Array.isArray(value) ? value : {};
+  }
+
+  function isExternalIDHidden(externalID) {
+    const hit = hitsByExternalId.get(String(externalID || ""));
+    const key = buildingKeyFromHit(hit);
+    return Boolean(key && hiddenBuildings.has(key));
+  }
+
+  function isCardHidden(card) {
+    return isExternalIDHidden(externalIdFromCard(card));
+  }
+
+  async function hideBuilding(externalID) {
+    const id = String(externalID || "");
+    const hit = hitsByExternalId.get(id);
+    const buildingKey = buildingKeyFromHit(hit);
+    if (!buildingKey) return;
+    if (activePopover && activePopover.close) activePopover.close();
+
+    const current = await readHiddenBuildings();
+    const result = resultsByExternalId.get(id);
+    const rating = result && result.rating != null && Number.isFinite(Number(result.rating))
+      ? Number(result.rating)
+      : null;
+    current[buildingKey] = {
+      label: hit.building || hit.neighbourhood || hit.title || "This building",
+      neighbourhood: hit.neighbourhood || "",
+      rating,
+      hiddenAt: Date.now()
+    };
+    await chrome.storage.local.set({ [HIDDEN_BUILDINGS_KEY]: current });
+  }
+
+  async function unhideBuilding(buildingKey) {
+    const current = await readHiddenBuildings();
+    if (!Object.prototype.hasOwnProperty.call(current, buildingKey)) return;
+    delete current[buildingKey];
+    await chrome.storage.local.set({ [HIDDEN_BUILDINGS_KEY]: current });
+  }
+
+  async function unhideAllBuildings() {
+    await chrome.storage.local.set({ [HIDDEN_BUILDINGS_KEY]: {} });
   }
 
   function allListingCards() {
@@ -494,6 +650,7 @@
           <button type="button" class="br-sort-button${sortMode === "lowest" ? " br-sort-active" : ""}" data-sort="lowest" aria-pressed="${sortMode === "lowest" ? "true" : "false"}">Lowest</button>
         </div>
         <div class="br-reviews">${reviewsHtml}</div>
+        <button type="button" class="br-popover-hide">🚫 Hide this building</button>
       </div>
     `;
   }
@@ -502,7 +659,7 @@
     event.stopPropagation();
   }
 
-  async function openPortalPopover(badge, result, reviews) {
+  async function openPortalPopover(badge, result, reviews, externalID) {
     if (activePopover && activePopover.close) {
       activePopover.close();
     }
@@ -513,6 +670,7 @@
       portal,
       result,
       reviews,
+      externalID,
       sortMode: "newest",
       hideTimer: 0,
       listening: false,
@@ -538,6 +696,14 @@
         link.addEventListener("click", stopCardClick);
         link.addEventListener("pointerdown", stopCardClick);
       });
+      const hideButton = portal.root.querySelector(".br-popover-hide");
+      hideButton.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        hideBuilding(state.externalID).catch(() => {});
+        close();
+      });
+      hideButton.addEventListener("pointerdown", stopCardClick);
     }
 
     function position() {
@@ -624,7 +790,7 @@
     function show() {
       wrap.classList.add("br-open");
       if (badgeKind(result) === "loaded") {
-        openPortalPopover(badge, result, reviews).catch(() => {});
+        openPortalPopover(badge, result, reviews, externalID).catch(() => {});
       }
     }
 
@@ -653,13 +819,27 @@
     badge.addEventListener("focus", show);
     badge.addEventListener("blur", scheduleHide);
 
+    const hideButton = root.querySelector(".br-badge-hide");
+    if (hideButton) {
+      hideButton.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        hideBuilding(externalID).catch(() => {});
+      });
+      hideButton.addEventListener("pointerdown", (event) => {
+        event.stopPropagation();
+      });
+    }
+
     host.__bayutRatingsCleanup = function cleanupPopoverHandlers() {
       scheduleHide();
     };
   }
 
   async function renderPanel(card, externalID, result) {
+    if (isCardHidden(card)) return;
     const css = await getPanelCss();
+    if (isCardHidden(card)) return;
     const target = panelHostForCard(card, externalID);
     let host = target.host;
     if (!host) {
@@ -694,6 +874,7 @@
           <span class="br-badge-text">${escapeHtml(state || summary)}</span>
           ${retryable ? `<span class="br-retry-hint">retry</span>` : ""}
           ${kind === "loaded" ? mapsIconLink(mapsUrl, "br-badge-link br-maps-icon") : ""}
+          <button type="button" class="br-badge-hide" aria-label="Hide this building" title="Hide this building">✕</button>
         </div>
       </section>
     `;
@@ -706,7 +887,7 @@
 
   function renderResultEverywhere(externalID, result) {
     allListingCards().forEach((card) => {
-      if (externalIdFromCard(card) === externalID) {
+      if (externalIdFromCard(card) === externalID && !isCardHidden(card)) {
         renderPanel(card, externalID, result);
       }
     });
@@ -714,7 +895,7 @@
 
   async function requestLookup(card) {
     const externalID = externalIdFromCard(card);
-    if (!externalID || requestedCards.has(card)) return;
+    if (!externalID || requestedCards.has(card) || isCardHidden(card)) return;
 
     const existing = resultsByExternalId.get(externalID);
     if (existing && existing.status !== "deferred") {
@@ -753,7 +934,7 @@
 
   async function resendLookup(externalID) {
     const hit = hitsByExternalId.get(externalID);
-    if (!hit) return;
+    if (!hit || isExternalIDHidden(externalID)) return;
 
     const response = await sendMessage({
       type: "LOOKUP_LISTING",
@@ -808,6 +989,10 @@
   const observer = new IntersectionObserver((entries) => {
     entries.forEach((entry) => {
       const externalID = externalIdFromCard(entry.target);
+      if (isCardHidden(entry.target)) {
+        if (externalID && visibleExternalIDs.delete(externalID)) scheduleViewportUpdate();
+        return;
+      }
       if (externalID) {
         const wasVisible = visibleExternalIDs.has(externalID);
         if (entry.isIntersecting) {
@@ -834,17 +1019,58 @@
   }
 
   function isExternalIDVisibleOrNearViewport(externalID) {
+    if (isExternalIDHidden(externalID)) return false;
     if (visibleExternalIDs.has(externalID)) return true;
-    return allListingCards().some((card) => externalIdFromCard(card) === externalID && isNearViewport(card));
+    return allListingCards().some((card) => (
+      externalIdFromCard(card) === externalID && !isCardHidden(card) && isNearViewport(card)
+    ));
+  }
+
+  function hideAdverts() {
+    // Bayut "Inline CPL Project" blocks are buy-a-building promos, not rentals we rate; hide them.
+    document.querySelectorAll(ADVERT_SELECTOR).forEach((advert) => {
+      if (advert.dataset.bayutRatingsHidden !== "1") {
+        advert.style.display = "none";
+        advert.dataset.bayutRatingsHidden = "1";
+      }
+    });
   }
 
   function scanListings() {
+    hideAdverts();
     const cards = allListingCards();
     observeResultsContainer(cards);
     let visibleChanged = false;
 
     cards.forEach((card) => {
       const externalID = externalIdFromCard(card);
+      if (isCardHidden(card)) {
+        if (card.dataset.bayutRatingsHidden !== "1") {
+          // Bayut owns map pins; hiding the listing card is the only map-view change we make.
+          card.style.display = "none";
+          card.dataset.bayutRatingsHidden = "1";
+        }
+        observer.unobserve(card);
+        observedCards.delete(card);
+        requestedCards.delete(card);
+        requestedExternalIds.delete(externalID);
+        pendingStartedAt.delete(externalID);
+        lastRecheckAt.delete(externalID);
+        if (visibleExternalIDs.delete(externalID)) visibleChanged = true;
+        if (focusedExternalID === externalID) {
+          focusedExternalID = null;
+          visibleChanged = true;
+        }
+        return;
+      }
+
+      if (card.dataset.bayutRatingsHidden === "1") {
+        card.style.display = "";
+        delete card.dataset.bayutRatingsHidden;
+        observedCards.delete(card);
+        requestedCards.delete(card);
+      }
+
       if (!observedCards.has(card)) {
         observedCards.add(card);
         observer.observe(card);
@@ -875,6 +1101,7 @@
     });
 
     if (visibleChanged) scheduleViewportUpdate();
+    renderHiddenManager(cards).catch(() => {});
   }
 
   function storeHits(hits) {
@@ -903,6 +1130,12 @@
     applyResult(String(message.externalID), message.result);
   });
 
+  chrome.storage.onChanged.addListener((changes, areaName) => {
+    if (areaName !== "local" || !changes[HIDDEN_BUILDINGS_KEY]) return;
+    setHiddenBuildings(changes[HIDDEN_BUILDINGS_KEY].newValue);
+    scanListings();
+  });
+
   const mutationObserver = new MutationObserver(() => {
     window.requestAnimationFrame(scanListings);
   });
@@ -919,7 +1152,8 @@
     });
   }
 
-  function start() {
+  async function start() {
+    setHiddenBuildings(await readHiddenBuildings());
     scanListings();
     scheduleViewportUpdate();
   }
@@ -951,8 +1185,10 @@
   }, MONITOR_INTERVAL_MS);
 
   if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", start, { once: true });
+    document.addEventListener("DOMContentLoaded", () => {
+      start().catch(() => {});
+    }, { once: true });
   } else {
-    start();
+    start().catch(() => {});
   }
 })();

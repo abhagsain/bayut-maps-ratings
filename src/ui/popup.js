@@ -4,11 +4,14 @@ const queuedCount = document.getElementById("queuedCount");
 const scrapingCount = document.getElementById("scrapingCount");
 const cachedCount = document.getElementById("cachedCount");
 const reviewCount = document.getElementById("reviewCount");
+const hiddenCount = document.getElementById("hiddenCount");
+const unhideAllButton = document.getElementById("unhideAllButton");
 const progressList = document.getElementById("progressList");
 const resumeButton = document.getElementById("resumeButton");
 const refreshButton = document.getElementById("refreshButton");
 const dashboardButton = document.getElementById("dashboardButton");
 const clearButton = document.getElementById("clearButton");
+const HIDDEN_BUILDINGS_KEY = "hidden:buildings";
 
 let refreshTimer = null;
 
@@ -59,8 +62,27 @@ function escapeHtml(value) {
     .replaceAll("'", "&#039;");
 }
 
+function renderHiddenBuildings(value) {
+  const hiddenBuildings = value && typeof value === "object" && !Array.isArray(value) ? value : {};
+  const count = Object.keys(hiddenBuildings).length;
+  hiddenCount.textContent = String(count);
+  unhideAllButton.disabled = count === 0;
+}
+
+async function refreshHiddenBuildings() {
+  const stored = await chrome.storage.local.get(HIDDEN_BUILDINGS_KEY);
+  renderHiddenBuildings(stored && stored[HIDDEN_BUILDINGS_KEY]);
+}
+
+async function unhideAllBuildings() {
+  await chrome.storage.local.set({ [HIDDEN_BUILDINGS_KEY]: {} });
+}
+
 async function refresh() {
-  const response = await sendMessage({ type: "GET_STATUS" });
+  const [response] = await Promise.all([
+    sendMessage({ type: "GET_STATUS" }),
+    refreshHiddenBuildings()
+  ]);
   if (response && response.ok && response.status) {
     renderStatus(response.status);
     return;
@@ -88,6 +110,14 @@ dashboardButton.addEventListener("click", () => {
 });
 clearButton.addEventListener("click", clearCache);
 resumeButton.addEventListener("click", resumeScraping);
+unhideAllButton.addEventListener("click", () => {
+  unhideAllBuildings().catch(() => {});
+});
+
+chrome.storage.onChanged.addListener((changes, areaName) => {
+  if (areaName !== "local" || !changes[HIDDEN_BUILDINGS_KEY]) return;
+  renderHiddenBuildings(changes[HIDDEN_BUILDINGS_KEY].newValue);
+});
 
 refresh();
 refreshTimer = setInterval(refresh, 1000);

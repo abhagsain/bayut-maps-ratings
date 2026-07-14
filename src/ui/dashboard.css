@@ -28,6 +28,11 @@ h1 {
   letter-spacing: 0;
 }
 
+h2 {
+  margin: 0;
+  font-size: 18px;
+}
+
 p {
   margin: 6px 0 0;
   color: #5f6368;
@@ -35,11 +40,42 @@ p {
 
 .status-strip,
 .toolbar,
-.table-wrap {
+.table-wrap,
+.hidden-section {
   margin-top: 18px;
   border: 1px solid #e1e5ea;
   border-radius: 10px;
   background: #fff;
+}
+
+.hidden-section {
+  overflow: hidden;
+}
+
+.section-heading {
+  display: flex;
+  padding: 14px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  border-bottom: 1px solid #edf0f2;
+}
+
+.hidden-table-wrap {
+  overflow-x: auto;
+}
+
+.hidden-table th {
+  cursor: default;
+}
+
+.hidden-table td:first-child {
+  font-weight: 600;
+}
+
+.unhide-button {
+  padding: 6px 9px;
+  color: #1967d2;
 }
 
 .status-strip {
@@ -86,6 +122,11 @@ button {
 button:hover {
   border-color: #bdc1c6;
   background: #f1f3f4;
+}
+
+button:disabled {
+  cursor: default;
+  opacity: 0.5;
 }
 
 button.danger {

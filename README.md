@@ -35,6 +35,7 @@ There is no build step and no dependencies — it's plain JavaScript loaded stra
 
 - **Badge:** each listing shows a compact `★ rating · N reviews` badge (inline under the location in list view, overlaid on the thumbnail in map view) plus a Google Maps icon link.
 - **Popover:** hover the badge for the rating distribution, per-review stars, and newest review snippets, with **Newest / Highest / Lowest** sorting.
+- **Hide a building:** click the **✕** on a badge (or **Hide this building** in the popover) to remove every listing from that building — now and in future searches, so a low-rated tower with dozens of listings stops cluttering your results. A small "N listings hidden" pill lets you review and unhide them; you can also manage the list from the dashboard and popup. (Bayut's own "buy this building" promo blocks are hidden automatically.)
 - **Progress:** click the pinned icon for live scraping status and cache size; open the dashboard for the full cached-building table.
 
 ---

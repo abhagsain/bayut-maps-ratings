@@ -3,8 +3,12 @@ const filterInput = document.getElementById("filterInput");
 const refreshButton = document.getElementById("refreshButton");
 const clearButton = document.getElementById("clearButton");
 const cacheBody = document.getElementById("cacheBody");
+const hiddenBuildingsBody = document.getElementById("hiddenBuildingsBody");
+const unhideAllButton = document.getElementById("unhideAllButton");
+const HIDDEN_BUILDINGS_KEY = "hidden:buildings";
 
 let cacheEntries = [];
+let hiddenBuildings = {};
 let sortKey = "scrapedAt";
 let sortDirection = "desc";
 let statusTimer = null;
@@ -71,6 +75,44 @@ function renderTable() {
     : `<tr><td colspan="5" class="muted">No cached buildings match this filter.</td></tr>`;
 }
 
+function renderHiddenBuildings() {
+  const rows = Object.entries(hiddenBuildings)
+    .sort((a, b) => Number(b[1].hiddenAt || 0) - Number(a[1].hiddenAt || 0));
+  unhideAllButton.disabled = rows.length === 0;
+  hiddenBuildingsBody.innerHTML = rows.length
+    ? rows.map(([key, entry]) => `
+        <tr>
+          <td>${escapeHtml(entry.label || "Hidden building")}</td>
+          <td>${escapeHtml(entry.neighbourhood || "-")}</td>
+          <td>${escapeHtml(formatRating(entry.rating))}</td>
+          <td>${escapeHtml(formatDate(entry.hiddenAt))}</td>
+          <td><button type="button" class="unhide-button" data-building-key="${escapeHtml(key)}">Unhide</button></td>
+        </tr>
+      `).join("")
+    : `<tr><td colspan="5" class="muted">No hidden buildings.</td></tr>`;
+}
+
+async function refreshHiddenBuildings() {
+  const stored = await chrome.storage.local.get(HIDDEN_BUILDINGS_KEY);
+  const value = stored && stored[HIDDEN_BUILDINGS_KEY];
+  hiddenBuildings = value && typeof value === "object" && !Array.isArray(value) ? value : {};
+  renderHiddenBuildings();
+}
+
+async function unhideBuilding(buildingKey) {
+  const stored = await chrome.storage.local.get(HIDDEN_BUILDINGS_KEY);
+  const current = stored && stored[HIDDEN_BUILDINGS_KEY] && typeof stored[HIDDEN_BUILDINGS_KEY] === "object"
+    ? stored[HIDDEN_BUILDINGS_KEY]
+    : {};
+  if (!Object.prototype.hasOwnProperty.call(current, buildingKey)) return;
+  delete current[buildingKey];
+  await chrome.storage.local.set({ [HIDDEN_BUILDINGS_KEY]: current });
+}
+
+async function unhideAllBuildings() {
+  await chrome.storage.local.set({ [HIDDEN_BUILDINGS_KEY]: {} });
+}
+
 async function refreshCache() {
   const response = await sendMessage({ type: "GET_CACHE_LIST" });
   cacheEntries = response && response.ok && Array.isArray(response.entries) ? response.entries : [];
@@ -102,6 +144,21 @@ refreshButton.addEventListener("click", () => {
   refreshStatus();
 });
 clearButton.addEventListener("click", clearCache);
+unhideAllButton.addEventListener("click", () => {
+  unhideAllBuildings().catch(() => {});
+});
+hiddenBuildingsBody.addEventListener("click", (event) => {
+  const button = event.target.closest(".unhide-button");
+  if (!button) return;
+  unhideBuilding(button.dataset.buildingKey || "").catch(() => {});
+});
+
+chrome.storage.onChanged.addListener((changes, areaName) => {
+  if (areaName !== "local" || !changes[HIDDEN_BUILDINGS_KEY]) return;
+  const value = changes[HIDDEN_BUILDINGS_KEY].newValue;
+  hiddenBuildings = value && typeof value === "object" && !Array.isArray(value) ? value : {};
+  renderHiddenBuildings();
+});
 
 document.querySelectorAll("th[data-sort]").forEach((header) => {
   header.addEventListener("click", () => {
@@ -124,6 +181,7 @@ document.querySelectorAll("th[data-sort]").forEach((header) => {
 
 refreshCache();
 refreshStatus();
+refreshHiddenBuildings();
 statusTimer = setInterval(refreshStatus, 2000);
 
 window.addEventListener("unload", () => {
